@@ -13,9 +13,10 @@ export type Schema = {
   block_translations: BlockTranslation[];    
 };
 
-const raw_url = import.meta.env.DIRECTUS_URL || process.env.DIRECTUS_URL || 'http://cms.gmjo.at/';
+const raw_url = import.meta.env.DIRECTUS_URL || process.env.DIRECTUS_URL || 'http://cms.baringuitar.com/';
 export const directus_url = /^https?:\/\//.test(raw_url) ? raw_url : `http://${raw_url}`;
 const directus_token = import.meta.env.DIRECTUS_TOKEN || process.env.DIRECTUS_TOKEN;
+console.log("directus_token ~~>", directus_token);
 
 const getDirectusSDK = () => {
   try {
