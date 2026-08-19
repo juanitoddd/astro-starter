@@ -1,0 +1,365 @@
+---
+import { focalPointPercent, getDirectusAssetUrl, toPixelParam, type DirectusAsset, type DirectusAssetTransform } from "@lib/directus/assets";
+import { buildContainerStyle } from "@lib/directus/container-style";
+import Reference from "@components/directus/Reference.astro";
+import Collection from "@components/directus/Collection.astro";
+import CustomBlock from "@components/directus/CustomBlock.astro";
+import type { CollectionData, CustomData, EditorJsBlock, EditorJsSpacingSides, FlexBlockItem, GridBlockItem, ReferenceData } from "@lib/directus/types";
+
+type Props = {
+  block: EditorJsBlock;
+  lang?: string;
+  depth?: number;
+  isLast?: boolean;
+};
+
+const { block, lang, depth = 0, isLast = false } = Astro.props as Props;
+const data = block.data ?? {};
+
+// Alignment tune → literal Tailwind classes (full strings so Tailwind's source scan emits them).
+const ALIGN_CLASS: Record<string, string> = {
+  left: "text-left",
+  center: "text-center",
+  right: "text-right",
+  justify: "text-justify",
+};
+const alignment = block.tunes?.alignment?.alignment ?? null;
+const alignClass = alignment ? ALIGN_CLASS[alignment] ?? "" : "";
+const widthClass = alignClass !== 'text-left' ? 'w-full' : '';
+
+// Flex tune → inline CSS. The tune values ("row", "space-around", "center"…) are already
+// valid CSS keywords, so they pass straight through — no class map / Tailwind scan needed.
+const flex = block.tunes?.flex;
+const flexStyle = buildContainerStyle({
+  type: "flex",
+  direction: flex?.direction,
+  justify: flex?.justify,
+  align: flex?.align,
+  gap: flex?.gap,
+});
+const flexItems = (data.items as FlexBlockItem[]) ?? [];
+
+// Grid block
+const gridItems = (data.items as GridBlockItem[]) ?? [];
+const grid = block.tunes?.grid;
+const gridStyle = buildContainerStyle({
+  type: "grid",
+  alignItems: grid?.alignItems,
+  gap: grid?.gap,
+  columns: data.columns as number | string | undefined,
+  columnTemplate: data.columnTemplate as string | undefined,
+});
+
+// Spacing tune → inline CSS on a wrapper container. Numeric values are treated as px;
+// string values (e.g. "1rem") pass through unchanged. Only defined sides are emitted.
+function spacingRules(prop: "padding" | "margin", sides?: EditorJsSpacingSides): string[] {
+  if (!sides) return [];
+  return (["top", "right", "bottom", "left"] as const)
+    .map((side) => {
+      const value = sides[side];
+      if (value === undefined || value === null || value === "") return null;
+      return `${prop}-${side}:${typeof value === "number" ? `${value}px` : value}`;
+    })
+    .filter(Boolean) as string[];
+}
+const spacing = block.tunes?.spacing;
+const spacingStyle = [
+  ...spacingRules("padding", spacing?.padding),
+  ...spacingRules("margin", spacing?.margin),
+].join(";");
+
+// Style tune → inline CSS on the block container. All fields optional; only set ones are emitted.
+const style = block.tunes?.style;
+const styleRules: string[] = [];
+if (style?.background) styleRules.push(`background-color:${style.background}`);
+if (style?.border) styleRules.push(`border:${style.border}`);
+if (style?.borderRadius != null && style.borderRadius !== "") {
+  styleRules.push(`border-radius:${typeof style.borderRadius === "number" ? `${style.borderRadius}px` : style.borderRadius}`);
+}
+
+// Combined container style — spacing + style tune. Wrapper is rendered only when non-empty.
+const wrapperStyle = [spacingStyle, styleRules.join(";")].filter(Boolean).join(";");
+
+type ListItem = { content?: string; items?: ListItem[] };
+function renderListItems(items: ListItem[] = [], style: string): string {
+  const tag = style === "ordered" ? "ol" : "ul";
+  const li = items
+    .map((it) => {
+      const inner = it.items && it.items.length > 0 ? renderListItems(it.items, style) : "";
+      return `<li>${it.content ?? ""}${inner}</li>`;
+    })
+    .join("");
+  return `<${tag} class="${style === "ordered" ? "list-decimal" : "list-disc"} ml-6 my-2">${li}</${tag}>`;
+}
+---
+
+{(() => {  
+  const rendered = (() => {
+  switch (block.type) {
+    case "paragraph": {
+      const text = (data.text as string) ?? "";
+      // Empty paragraph → render a blank line (<br />) instead of a collapsed <p></p> — EXCEPT
+      // when it's the last block (avoids a stray trailing blank line from a leftover empty block).
+      if (text.trim() === "") {
+        if (isLast) return null;
+        return <p class={`${alignClass} ${widthClass}`} set:html={'<br/>'} />;
+      }
+      return <p class={`${alignClass} ${widthClass}`} set:html={text} />;
+    }
+    case "header": {
+      const level = Math.min(Math.max(Number(data.level ?? 2), 1), 6);
+      const text = (data.text as string) ?? "";
+      const Tag = `h${level}` as "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
+      return <Tag class={`${alignClass} ${widthClass}`} set:html={text} />;
+    }
+    case "image": {      
+      const file = (data.file ?? {}) as {
+        url?: string;
+        link?: string;
+        widthDesktop?: number | string;
+        heightDesktop?: number | string;
+        widthMobile?: number | string;
+        heightMobile?: number | string;
+        maxWidth?: number | string;
+        maxHeight?: number | string;
+        maxWidthMobile?: number | string;
+        maxHeightMobile?: number | string;
+        objectFit?: string;
+        // Focal point (pixel coords relative to intrinsic width/height), stored by the editor.
+        focal_point_x?: number | null;
+        focal_point_y?: number | null;
+        image_credits?: string | null;
+      } & DirectusAsset;
+
+      // console.log("block~~>", block);
+      // width / height → Directus transform params. Absolute px pass through; desktop %/vw/auto
+      // can't be resolved server-side (no viewport) → skipped. Mobile %/vw ARE resolved against
+      // the breakpoint width, so a "100%" mobile image isn't requested larger than the breakpoint.
+      const MOBILE_BREAKPOINT = 640;
+      const transforms: DirectusAssetTransform = {};
+      const widthPx = []
+      if(file.widthDesktop) {
+        const w = toPixelParam(file.widthDesktop);
+        if(w) widthPx.push(w)
+      } else {
+        const mw = toPixelParam(file.maxWidth);
+        const mwm = toPixelParam(file.maxWidthMobile, MOBILE_BREAKPOINT);
+        const wm = toPixelParam(file.widthMobile, MOBILE_BREAKPOINT);
+        if(mw) widthPx.push(mw)
+        if(mwm) widthPx.push(mwm)
+        if(wm) widthPx.push(wm)        
+      }      
+      const heightPx = [toPixelParam(file.heightDesktop) /*, toPixelParam(file.maxHeight) */]
+        .filter((v): v is number => v != null);
+      
+      const ratio = file.widthMobile === '100%' ? 3 : 1;      
+      if (widthPx.length) transforms.width = Math.max(...widthPx) * ratio;
+      if (heightPx.length) transforms.height = Math.max(...heightPx) * ratio;
+
+      const url = getDirectusAssetUrl(file as DirectusAsset, transforms);
+
+      const caption = (data.caption as string) ?? "";
+      if (!url) return null;
+
+      // maxWidth / maxHeight → inline CSS. Numeric values are px; non-empty strings pass through.
+      const dimension = (value: number | string | null | undefined) =>
+        value === undefined || value === null || value === ""
+          ? null
+          : typeof value === "number" ? `${value}px` : value;
+      
+      // style="--iw:200px; --imw:600px; --iw-m:100px; …"
+      const imgAttrs = []      
+      
+      // Default width (--dw): fill the container when no desktop height is set, else auto
+      // (so a set height drives the size and width keeps the aspect ratio).
+      const height = file.heightDesktop ||  file.maxHeight || file.heightMobile || file.maxHeightMobile;
+      imgAttrs.push(["--dw", height ? "auto" : "100%"]);
+
+      if(file.widthDesktop) imgAttrs.push(["--iw", dimension(file.widthDesktop)]);
+      if(file.heightDesktop) imgAttrs.push(["--ih", dimension(file.heightDesktop)]);
+      if(file.maxWidth) imgAttrs.push(["--imw", dimension(file.maxWidth)]);
+      if(file.maxHeight) imgAttrs.push(["--imh", dimension(file.maxHeight)]);
+
+      if(file.widthMobile) imgAttrs.push(["--iw-m", dimension(file.widthMobile)]);
+      if(file.heightMobile) imgAttrs.push(["--ih-m", dimension(file.heightMobile)]);
+      if(file.maxWidthMobile) imgAttrs.push(["--imw-m", dimension(file.maxWidthMobile)]);
+      if(file.maxHeightMobile) imgAttrs.push(["--imh-m", dimension(file.maxHeightMobile)]);      
+
+      if(file.objectFit) imgAttrs.push(["--of", file.objectFit]);
+
+      // Focal point → object-position vars (CSS falls back to 50% per axis).
+      const { x: opX, y: opY } = focalPointPercent(file);
+      if (opX) imgAttrs.push(["--op-x", opX]);
+      if (opY) imgAttrs.push(["--op-y", opY]);
+
+      const imgStyle = imgAttrs
+        .filter(([, v]) => v)
+        .map(([prop, v]) => `${prop}:${v}`)
+        .join(";");
+      
+      return (
+        <figure class={`${alignClass} ${widthClass}`}>
+          {file.link ? (
+            <a href={file.link} target="_blank" rel="noopener noreferrer">
+              <img src={url} alt={caption} class="w-full editorjs-image max-w-full h-auto inline-block" style={imgStyle || undefined} />                            
+            </a>
+          ) : (            
+            <img src={url} alt={caption} class="w-full editorjs-image max-w-full h-auto inline-block" style={imgStyle || undefined} />            
+          )}
+          <div class="text-sm text-gray-500">{file.image_credits}</div>
+          {caption && <figcaption class="text-sm opacity-70 mt-1" set:html={caption} />}
+        </figure>
+      );
+    }
+    case "list":
+    case "nestedlist": {
+      const style = (data.style as string) ?? "unordered";
+      const items = (data.items as ListItem[]) ?? [];
+      return <Fragment set:html={renderListItems(items, style)} />;
+    }
+    case "quote": {
+      const text = (data.text as string) ?? "";
+      const caption = (data.caption as string) ?? "";
+      return (
+        <blockquote class={`border-l-4 pl-4 my-4 italic ${alignClass} ${widthClass}`}>
+          <p set:html={text} />
+          {caption && <cite class="text-sm not-italic opacity-70" set:html={caption} />}
+        </blockquote>
+      );
+    }
+    case "delimiter": {
+      return <hr class="my-6" />;
+    }
+    case "code": {
+      const code = (data.code as string) ?? "";
+      return <pre class={`bg-gray-100 overflow-x-auto ${alignClass} ${widthClass}`}><code>{code}</code></pre>;
+    }
+    case "htmlblock": {
+      const html = (data.html as string) ?? "";
+      if (!html) return null;
+      return <Fragment set:html={html} />;
+    }
+    case "button": {      
+      const text = (data.text as string) ?? "";
+      const target = (data.target as string) ?? "";
+      const href = (data.href as string) ?? ""
+      const size = (data.size as string) ?? "medium"
+      // Styles
+      const color = (data.color as string) ?? "#000"
+      const background = (data.background as string) ?? "#f0f4f9"
+      // const hoverBackground = (data.hoverBackground as string) ?? "#fff"
+      const borderColor = data.borderColor
+      const btnStyles = [
+        `color:${color}`,
+        `background:${background}`,                
+      ]
+      if(borderColor) {
+        btnStyles.push(`border: 1px solid ${borderColor}`)
+      }      
+      const btnStyle = btnStyles.join(";");
+      return (
+        <div class={`${alignClass}`}>
+          <a class={`editorjs-button ${size}`} href={href} target={target} style={btnStyle} set:html={text}></a>
+        </div>
+      )
+    }
+    case "flexblock": {
+      return (
+        <div class={flexStyle.className} style={flexStyle.style}>
+          {flexItems.map((item) => (
+            <div
+              class="flex"
+              style={`flex-grow:${item.grow ? 1 : 0}`}
+            >
+              {/* Each item is its own nested EditorJS document — render its blocks recursively. */}
+              {(item.content?.blocks ?? []).map((nested, i, arr) => (
+                <Astro.self block={nested} lang={lang} depth={depth} isLast={i === arr.length - 1} />
+              ))}
+            </div>
+          ))}
+        </div>
+      );
+    }
+    case "gridblock": {
+      for(const item of gridItems) {
+        // console.log("item length", !!item.content)
+      }
+      return (
+        <div class={gridStyle.className} style={gridStyle.style}>
+          {gridItems.map((item) => (
+            <div class={`${!!item.content ? 'editorjs-grid-item' : 'editorjs-grid-item-empty'}`}>
+              {/* Each item is its own nested EditorJS document — render its blocks recursively. */}
+              {(item.content?.blocks ?? []).map((nested, i, arr) => (
+                <Astro.self block={nested} lang={lang} depth={depth} isLast={i === arr.length - 1} />
+              ))}
+            </div>
+          ))}
+        </div>
+      );
+    }
+    case "accordionblock": {
+      // Both `title` and `content` are nested EditorJS documents (any combination of blocks),
+      // like flex/grid items — rendered recursively via Astro.self.
+      const toBlocks = (value: unknown): EditorJsBlock[] => {
+        const v = value as { blocks?: EditorJsBlock[] } | EditorJsBlock[] | undefined;
+        return Array.isArray(v) ? v : (v?.blocks ?? []);
+      };
+      const titleBlocks = toBlocks(data.title);
+      const contentBlocks = toBlocks(data.content);
+      return (
+        <details class="accordion border-b group" open={data.open ? true : undefined}>
+          <summary class="flex items-center gap-2 cursor-pointer select-none py-3 font-bold list-none [&::-webkit-details-marker]:hidden">
+            {/* Custom marker (native one is hidden) — rotates to point down when open. */}
+            <svg
+              class="w-3 h-3 shrink-0 transition-transform group-open:rotate-90"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+            >
+              <polyline points="9 6 15 12 9 18" />
+            </svg>
+            <span class="flex-1">
+              {titleBlocks.map((nested, i, arr) => (
+                <Astro.self block={nested} lang={lang} depth={depth} isLast={i === arr.length - 1} />
+              ))}
+            </span>
+          </summary>
+          <div class="pb-4">
+            {contentBlocks.map((nested, i, arr) => (
+              <Astro.self block={nested} lang={lang} depth={depth} isLast={i === arr.length - 1} />
+            ))}
+          </div>
+        </details>
+      );
+    }
+    case "reference": {
+      const ref = data as ReferenceData;
+      return (
+        <Reference
+          collection={ref.collection}
+          template={ref.template}
+          itemId={ref.itemId}
+          lang={lang}
+          depth={depth}
+        />
+      );
+    }
+    case "collectionblock": {
+      return <Collection data={data as CollectionData} lang={lang} depth={depth} />;
+    }
+    case "componentblock": {      
+      return <CustomBlock data={data as CustomData} lang={lang} depth={depth} />;
+    }
+
+    case "delimiterblock": {      
+      const data = block.data;
+      const style = { borderTopWidth: data.width ?? '1px', borderTopColor: data.color ?? '#999'}      
+      return <hr style={style} />
+    }
+
+    default:
+      // console.log("block", block);
+      return null;
+  }
+  })();
+  return wrapperStyle ? <div style={wrapperStyle}>{rendered}</div> : rendered;
+})()}

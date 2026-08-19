@@ -1,0 +1,26 @@
+---
+import EditorJs from "@components/directus/EditorJs.astro";
+import { pickTranslation, type Block } from "@lib/directus/types";
+import { getDirectusEditAttr, type DirectusVisualEditable } from "@lib/directus/visual-editor";
+
+type Props = {
+  block: Block;
+  lang: string;
+};
+
+const { block, lang } = Astro.props as Props;
+const translation = pickTranslation(block.translations, lang);
+
+const editable: DirectusVisualEditable = {
+  __directus: {
+    collection: "block",
+    item: block.id,
+    translationCollection: "block_translations",
+    translationItem: translation?.id ?? null,
+  },
+};
+---
+
+<section class="container block-section py-4" data-directus={getDirectusEditAttr(editable, "content")}>
+  <EditorJs content={translation?.content} lang={lang} />
+</section>

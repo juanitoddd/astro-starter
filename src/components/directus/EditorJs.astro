@@ -1,0 +1,22 @@
+---
+import BlockRenderer from "@components/directus/BlockRenderer.astro";
+import { enrichEditorJsImages } from "@lib/directus/editorjs-images";
+import type { EditorJsBlock, EditorJsContent } from "@lib/directus/types";
+
+type Props = {
+  content: EditorJsContent | null | undefined;
+  class?: string;
+  lang?: string;
+  depth?: number;
+};
+
+const { content, class: className, lang, depth = 0 } = Astro.props as Props;
+// Refresh image blocks' snapshot `data.file` with live directus_files metadata (credits, focal
+// point, dimensions) so older references pick up current values. Mutates content in place.
+await enrichEditorJsImages(content);
+const blocks: EditorJsBlock[] = content?.blocks ?? [];
+---
+
+<div class={className}>
+  {blocks.map((block, i) => <BlockRenderer block={block} lang={lang} depth={depth} isLast={i === blocks.length - 1} />)}
+</div>
