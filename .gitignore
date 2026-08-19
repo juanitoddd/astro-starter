@@ -4,6 +4,9 @@ dist/
 # generated types
 .astro/
 
+# deployment logs
+logs/
+
 # dependencies
 node_modules/
 
