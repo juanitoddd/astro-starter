@@ -25,6 +25,12 @@ LOG_FILE="$LOGS_DIR/build-$TIMESTAMP.log"
 
 mkdir -p "$RELEASES_DIR" "$LOGS_DIR"
 
+echo "[deploy $TIMESTAMP] installing dependencies"
+if ! npm ci >>"$LOG_FILE" 2>&1; then
+  echo "[deploy $TIMESTAMP] DEPENDENCY INSTALL FAILED. Log: $LOG_FILE"
+  exit 1
+fi
+
 echo "[deploy $TIMESTAMP] building -> $STAGING_DIR"
 if ! node scripts/build-static.mjs --out-dir "$STAGING_DIR" >"$LOG_FILE" 2>&1; then
   echo "[deploy $TIMESTAMP] BUILD FAILED. Log: $LOG_FILE"
