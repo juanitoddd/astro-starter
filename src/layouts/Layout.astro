@@ -1,14 +1,135 @@
+---
+import "../styles/global.css";
+import LanguageSwitcher from "@/components/layout/LanguageSwitcher.astro";
+import ThemeSwitcher from "@/components/layout/ThemeSwitcher";
+import Menu from "@/components/layout/Menu.astro";
+import MenuMobile from "@/components/layout/MenuMobile.astro";
+import { getLangFromUrl, switchLang } from '@/lib/i18n';
+import { languagePrefixes } from '@/constants/languages';
+
+type Props = {
+  title?: string;
+  menuName?: string;
+  description?: string;
+  keywords?: string;
+  author?: string;
+  robots?: string;
+  canonical?: string;
+  ogImage?: string;
+  ogType?: string;
+  twitterCard?: string;
+  twitterSite?: string;
+  twitterCreator?: string;
+  themeColor?: string;
+};
+const {
+  title = "Bar in Guitar",
+  menuName = "main",
+  description = "",
+  keywords = "",
+  author = "",
+  robots = "index, follow",
+  canonical = "",
+  ogImage = "",
+  ogType = "website",
+  twitterCard = "summary_large_image",
+  twitterSite = "",
+  twitterCreator = "",
+  themeColor = "",
+} = Astro.props as Props;
+
+// Map short lang codes to full Open Graph locale codes
+const ogLocales: Record<string, string> = {
+  en: 'en_US',
+  de: 'de_DE',
+  it: 'it_IT',
+};
+
+const currentLang = getLangFromUrl(Astro.url);
+const ogLocale = ogLocales[currentLang] || currentLang;
+
+function absUrl(pathOrUrl: string) {
+  if (pathOrUrl.startsWith('http')) return pathOrUrl;
+  const base = Astro.url.origin;
+  const sep = pathOrUrl.startsWith('/') ? '' : '/';
+  return `${base}${sep}${pathOrUrl}`;
+}
+
+const pagePath = switchLang(Astro.url, currentLang);
+const pageUrl = canonical ? absUrl(canonical) : Astro.url.href;
+const ogImageUrl = ogImage ? absUrl(ogImage) : '';
+const alternateUrls = languagePrefixes.map((lang) => ({
+  lang,
+  href: absUrl(switchLang(Astro.url, lang)),
+}));
+const defaultLang = languagePrefixes[0];
+const defaultUrl = absUrl(switchLang(Astro.url, defaultLang));
+---
 <!doctype html>
-<html lang="en">
+<html lang={currentLang}>
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width" />
 		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 		<link rel="icon" href="/favicon.ico" />
 		<meta name="generator" content={Astro.generator} />
-		<title>Astro Basics</title>
+		<!-- SEO -->
+		<meta name="description" content={description} />
+		<meta name="keywords" content={keywords} />
+		<meta name="author" content={author} />
+		<meta name="robots" content={robots} />
+		{themeColor && <meta name="theme-color" content={themeColor} />}
+		<link rel="canonical" href={pageUrl} />
+
+		<!-- Open Graph -->
+		<meta property="og:title" content={title} />
+		<meta property="og:description" content={description} />
+		<meta property="og:type" content={ogType} />
+		<meta property="og:url" content={pageUrl} />
+		{ogImageUrl && <meta property="og:image" content={ogImageUrl} />}
+		{ogImageUrl && <meta property="og:image:alt" content={title} />}
+		<meta property="og:locale" content={ogLocale} />
+		{ogLocales[currentLang] && languagePrefixes
+      .filter((l) => l !== currentLang && ogLocales[l])
+      .map((l) => <meta property="og:locale:alternate" content={ogLocales[l]} />)
+    }
+
+		<!-- Hreflang -->
+		{alternateUrls.map(({ lang, href }) => (
+      <link rel="alternate" hreflang={lang} href={href} />
+    ))}
+		<link rel="alternate" hreflang="x-default" href={defaultUrl} />
+
+		<!-- Twitter Card -->
+		<meta name="twitter:card" content={twitterCard} />
+		<meta name="twitter:title" content={title} />
+		<meta name="twitter:description" content={description} />
+		{twitterSite && <meta name="twitter:site" content={twitterSite} />}
+		{twitterCreator && <meta name="twitter:creator" content={twitterCreator} />}
+		{ogImageUrl && <meta name="twitter:image" content={ogImageUrl} />}
+		{ogImageUrl && <meta name="twitter:image:alt" content={title} />}
+
+		<title>{title}</title>
+		<script src="/scripts/theme.js" is:inline></script>
 	</head>
 	<body>
+
+		<header class="sticky top-0 z-10">
+			<div class="hidden md:grid grid-cols-3 items-center px-6 py-4">
+				<Menu name={menuName} lang={currentLang} />
+				<a href="/" class="text-2xl font-bold text-center uppercase font-light">{title}</a>
+				<div class="flex items-center gap-4 justify-end">
+					<LanguageSwitcher />
+					<ThemeSwitcher client:load />
+				</div>
+			</div>
+			<div class="grid md:hidden grid-cols-3 bg-white items-center px-6 py-4">
+				<MenuMobile name={menuName} lang={currentLang} />
+				<a href="/" class="text-lg font-bold text-center text-black uppercase font-light">{title}</a>
+				<LanguageSwitcher />
+			</div>
+		</header>		
+
 		<slot />
 	</body>
 </html>

@@ -1,0 +1,53 @@
+---
+import { fetchMenuByName, resolveMenuUrl } from "@/lib/directus/menu";
+import { pickTranslation } from "@/lib/directus/types";
+
+type Props = {
+  name: string;
+  lang: string;
+  class?: string;
+};
+
+const { name, lang, class: className } = Astro.props as Props;
+const menu = await fetchMenuByName(name);
+const items = menu?.items ?? [];
+---
+
+{items.length > 0 && (
+  <nav class={className} aria-label={name}>
+    <ul class="flex gap-4 items-center">
+      {items.map((item: any) => {
+        const translation = pickTranslation(item.translations, lang);
+        const label = translation?.label ?? item.url;
+        const href = resolveMenuUrl(item.url, lang);
+        const children = item.children ?? [];
+        const hasChildren = children.length > 0;
+        return (
+          <li class="relative group">
+            <a
+              class="font-regular uppercase hover:underline"
+              href={href}
+              aria-haspopup={hasChildren ? "true" : undefined}
+            >{label}</a>
+            {hasChildren && (
+              <ul
+                class="absolute left-0 top-full z-20 hidden min-w-48 shadow-md py-2 group-hover:block group-focus-within:block"
+              >
+                {children.map((child: any) => {
+                  const childTranslation = pickTranslation(child.translations, lang);
+                  const childLabel = childTranslation?.label ?? child.url;
+                  const childHref = resolveMenuUrl(child.url, lang);
+                  return (
+                    <li>
+                      <a class="block px-4 py-2 whitespace-nowrap uppercase hover:underline" href={childHref}>{childLabel}</a>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  </nav>
+)}

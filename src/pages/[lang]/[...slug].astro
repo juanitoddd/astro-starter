@@ -1,9 +1,9 @@
 ---
-import Layout from "@layouts/Layout.astro";
-import SectionRenderer from "@components/directus/SectionRenderer.astro";
-import { fetchAllPageSlugs, fetchPageBySlug } from "@/lib/directus/page";
-import { languagePrefixes } from "@constants/languages";
-import type { Page } from "@/lib/directus/types";
+import Layout from '@layouts/Layout.astro';
+import SectionRenderer from '@components/directus/SectionRenderer.astro';
+import { fetchAllPageSlugs, fetchPageBySlug } from '@/lib/directus/page';
+import { languagePrefixes } from '@constants/languages';
+import type { Page } from '@/lib/directus/types';
 
 export async function getStaticPaths() {
   const slugs = await fetchAllPageSlugs();
@@ -13,7 +13,9 @@ export async function getStaticPaths() {
       return page ? { slug, page } : null;
     }),
   );
-  const valid = pages.filter((p): p is { slug: string; page: Page } => p !== null);
+  const valid = pages.filter(
+    (p): p is { slug: string; page: Page } => p !== null,
+  );
 
   return languagePrefixes.flatMap((lang) =>
     valid.map(({ slug, page }) => ({
@@ -30,5 +32,13 @@ const sections = page.sections ?? [];
 ---
 
 <Layout>
-  {sections.map((section) => <SectionRenderer section={section} lang={lang} />)}
+  <div class='w-full px-4'>
+    <div class='w-full max-w-[1024px] mx-auto'>
+      {
+        sections.map((section) => (
+          <SectionRenderer section={section} lang={lang} />
+        ))
+      }
+    </div>
+  </div>
 </Layout>
